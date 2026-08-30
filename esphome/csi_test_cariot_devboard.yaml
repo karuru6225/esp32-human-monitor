@@ -1,0 +1,49 @@
+# ============================================================
+# WiFi CSI 人感検証用ファームウェア（car-iot開発機用・一時テスト）
+# board: の値は汎用のESP32-S3-DevKitC相当にしてあります。
+# 実機のチップ型番が違う/書き込みに失敗する場合は、KiCadの部品表を確認して
+# 実際のモジュール型番に合わせて board: の値を調整してください
+# （espectre自体はGPIOを使わないので、多少ずれていても動く可能性が高いです）
+# ============================================================
+esphome:
+  name: csi-test-cariot
+  friendly_name: "CSI Test CarIoT Dev"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+
+logger:
+  level: DEBUG
+
+api:
+ota:
+  platform: esphome
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/PeterkoCZ91/esphome-wifi-csi.git
+    components: [espectre]
+
+espectre:
+  id: espectre_csi
+  traffic_generator_rate: 100
+  movement_sensor:
+    name: "Movement Score"
+  breathing_rate_sensor:
+    name: "Breathing Rate"
+  presence_sensor:
+    name: "Presence Detected"
+  motion_detected:
+    name: "Motion Detected"

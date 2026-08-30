@@ -1,0 +1,49 @@
+# ============================================================
+# WiFi CSI 人感検証用ファームウェア（M5AtomS3 Lite用・一時テスト）
+# 現在のSesame5連携用の設定は必ずバックアップしてから書き込んでください
+# 終わったら元のYAMLに戻せば本番機能は復旧します
+# ============================================================
+esphome:
+  name: csi-test-atoms3lite
+  friendly_name: "CSI Test AtomS3Lite"
+
+esp32:
+  board: esp32-s3-devkitc-1   # AtomS3 Lite (ESP32-S3) 用の汎用ボード定義
+  framework:
+    type: esp-idf             # espectreはesp-idf必須、Arduino非対応
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# 既存のMosquitto(NAS上)を使う場合
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+
+logger:
+  level: DEBUG
+
+api:
+ota:
+  platform: esphome
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/PeterkoCZ91/esphome-wifi-csi.git
+    components: [espectre]
+
+# ---- Level 1: セルフセンシング（自分でトラフィックを作ってCSIを取る） ----
+espectre:
+  id: espectre_csi
+  traffic_generator_rate: 100   # 100pkt/s 自己生成。ESPectre側の最低要件(10pkt/s)は十分満たす
+  movement_sensor:
+    name: "Movement Score"
+  breathing_rate_sensor:
+    name: "Breathing Rate"
+  presence_sensor:
+    name: "Presence Detected"
+  motion_detected:
+    name: "Motion Detected"
