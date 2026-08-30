@@ -17,6 +17,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <string.h>
+#include <math.h>
 
 extern "C"
 {
@@ -28,12 +29,31 @@ extern "C"
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 
+// サブキャリア別振幅データの送信先（PC側の受信スクリプト、tools/csi_udp_listener.py）
+// 環境に合わせてPCのLAN IPをsecrets.hのPC_IP_ADDRに設定すること
+const char *PC_IP = PC_IP_ADDR;
+const uint16_t PC_PORT = 5005;
+
 WiFiUDP udp;
+WiFiUDP dataUdp;
 IPAddress gatewayIP;
 
 #define CSI_MAX_LEN 400
 static int8_t prev_buf[CSI_MAX_LEN];
 static int prev_len = 0;
+
+// サブキャリア別振幅の最大本数（len=400バイト / 2 = 200サブキャリア分の余裕を見た値）
+#define MAX_SUBCARRIERS 200
+static float subcarrier_amp[MAX_SUBCARRIERS];
+static uint32_t udp_seq = 0;
+
+// PCへ送るパケットのヘッダ（tools/csi_udp_listener.py 側のstruct.unpack形式と対応）
+struct __attribute__((packed)) CsiUdpHeader
+{
+  uint32_t seq;
+  int16_t rssi;
+  uint16_t num_subcarriers;
+};
 
 // 接続中APのBSSID（送信元MACフィルタ用）
 static uint8_t ap_bssid[6] = {0};
@@ -94,6 +114,30 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
   Serial.printf("rssi=%d, len=%d, avg_amp=%.2f, diff_score=%.2f, filt=%lu/%lu\n",
                 info->rx_ctrl.rssi, len, avg_amplitude, diff_score,
                 (unsigned long)csi_count_accepted, (unsigned long)csi_count_total);
+
+  // サブキャリアごとの振幅を計算してPCへUDP送信（位置特定に使えるか検証用）
+  // bufは (Q, I) が交互に並んでいる: buf[2n]=虚部, buf[2n+1]=実部
+  int num_subcarriers = len / 2;
+  if (num_subcarriers > MAX_SUBCARRIERS)
+  {
+    num_subcarriers = MAX_SUBCARRIERS;
+  }
+  for (int i = 0; i < num_subcarriers; i++)
+  {
+    float q = (float)csi_data[2 * i];
+    float ii = (float)csi_data[2 * i + 1];
+    subcarrier_amp[i] = sqrtf(q * q + ii * ii);
+  }
+
+  CsiUdpHeader hdr;
+  hdr.seq = udp_seq++;
+  hdr.rssi = info->rx_ctrl.rssi;
+  hdr.num_subcarriers = (uint16_t)num_subcarriers;
+
+  dataUdp.beginPacket(PC_IP, PC_PORT);
+  dataUdp.write((uint8_t *)&hdr, sizeof(hdr));
+  dataUdp.write((uint8_t *)subcarrier_amp, num_subcarriers * sizeof(float));
+  dataUdp.endPacket();
 }
 
 void setup()

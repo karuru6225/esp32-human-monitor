@@ -3,3 +3,4 @@
 secrets.yaml
 secrets.h
 logs/
+tools/csi_listener/data/
