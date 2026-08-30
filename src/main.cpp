@@ -47,13 +47,18 @@ static int prev_len = 0;
 static float subcarrier_amp[MAX_SUBCARRIERS];
 static uint32_t udp_seq = 0;
 
-// PCへ送るパケットのヘッダ（tools/csi_udp_listener.py 側のstruct.unpack形式と対応）
+// PCへ送るパケットのヘッダ（tools/csi_listener/listener.py 側のstruct.unpack形式と対応）
+// device_mac：自機のMACアドレス。Dockerのポート公開(NAT)経由だと送信元IPが
+// ブリッジのゲートウェイに化けて複数台を区別できないため、ペイロード側で識別する
 struct __attribute__((packed)) CsiUdpHeader
 {
+  uint8_t device_mac[6];
   uint32_t seq;
   int16_t rssi;
   uint16_t num_subcarriers;
 };
+
+static uint8_t own_mac[6] = {0};
 
 // 接続中APのBSSID（送信元MACフィルタ用）
 static uint8_t ap_bssid[6] = {0};
@@ -130,6 +135,7 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
   }
 
   CsiUdpHeader hdr;
+  memcpy(hdr.device_mac, own_mac, 6);
   hdr.seq = udp_seq++;
   hdr.rssi = info->rx_ctrl.rssi;
   hdr.num_subcarriers = (uint16_t)num_subcarriers;
@@ -167,6 +173,12 @@ void setup()
   Serial.printf("AP BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
                 ap_bssid[0], ap_bssid[1], ap_bssid[2],
                 ap_bssid[3], ap_bssid[4], ap_bssid[5]);
+
+  // 自機のMACアドレスを保存（PCへのUDP送信時に複数台を区別するため）
+  WiFi.macAddress(own_mac);
+  Serial.printf("Own MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                own_mac[0], own_mac[1], own_mac[2],
+                own_mac[3], own_mac[4], own_mac[5]);
 
   // ---- CSI設定 ----
   wifi_csi_config_t csi_config = {

@@ -11,8 +11,16 @@ POS_PORT = int(os.environ.get("POS_PORT", 5006))
 OUT_PATH = os.environ.get("OUT_PATH", "/data/csi_subcarrier_log.csv")
 POS_OUT_PATH = os.environ.get("POS_OUT_PATH", "/data/position_log.csv")
 
-HEADER_FMT = "<IhH"  # seq(uint32), rssi(int16), num_subcarriers(uint16) — main.cppのCsiUdpHeaderと対応
+
+# device_mac(6bytes), seq(uint32), rssi(int16), num_subcarriers(uint16) — main.cppのCsiUdpHeaderと対応
+# Docker越しだと送信元IPがブリッジのゲートウェイに化けて複数台を区別できないため、
+# ペイロードに埋め込んだMACアドレスで機器を識別する
+HEADER_FMT = "<6sIhH"
 HEADER_LEN = struct.calcsize(HEADER_FMT)
+
+
+def mac_to_str(raw: bytes) -> str:
+    return ":".join(f"{b:02X}" for b in raw)
 
 
 def csi_listener():
@@ -26,13 +34,13 @@ def csi_listener():
         writer = csv.writer(f)
         while True:
             data, addr = sock.recvfrom(4096)
-            seq, rssi, num_sc = struct.unpack_from(HEADER_FMT, data, 0)
+            mac_raw, seq, rssi, num_sc = struct.unpack_from(HEADER_FMT, data, 0)
             amps = struct.unpack_from(f"<{num_sc}f", data, HEADER_LEN)
             recv_t = time.time()
             if not header_written:
-                writer.writerow(["recv_time", "seq", "rssi"] + [f"sc{i}" for i in range(num_sc)])
+                writer.writerow(["recv_time", "device_mac", "seq", "rssi"] + [f"sc{i}" for i in range(num_sc)])
                 header_written = True
-            writer.writerow([f"{recv_t:.3f}", seq, rssi] + [f"{a:.2f}" for a in amps])
+            writer.writerow([f"{recv_t:.3f}", mac_to_str(mac_raw), seq, rssi] + [f"{a:.2f}" for a in amps])
             f.flush()
 
 
