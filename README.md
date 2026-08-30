@@ -10,14 +10,15 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 ## 現在の方針
 
-- **本命ルート**：PlatformIOでEspressif公式`esp-csi`を参考にした自作ファームウェア（`src/main.cpp`）。MQTT等の外部連携はまだ入れず、シリアル出力＋WiFi UDP（`tools/csi_listener`でPCへサブキャリア別振幅を送信）で「CSIが実際に動きに反応するか」を検証する段階。単一スカラー(rssi/avg_amp)だけでなく、サブキャリア単位への分解・フレネルゾーン理論に基づくノード配置最適化まで進んでいる（詳細は`docs/handoff.md`）
+- **本命ルート**：PlatformIOでEspressif公式`esp-csi`を参考にした自作ファームウェア（`src/main.cpp`）。MQTT等の外部連携はまだ入れず、シリアル出力＋WiFi UDP（`tools/csi_listener`でPCへサブキャリア別振幅を送信）で「CSIが実際に動きに反応するか」を検証する段階。単一スカラー(rssi/avg_amp)だけでなく、サブキャリア単位への分解・フレネルゾーン理論に基づくノード配置最適化まで進んでいる（現状は`docs/handoff.md`、検証の詳細は`docs/research_log.md`）
 - **参考/代替ルート**：ESPHome + `espectre`外部コンポーネントを使う方法も`esphome/`以下に残してある（HA連携が最初から付いてくる分、検証後にすぐ使える）
 
 ## 検証に使うハードウェア
 
-- car-iot用に作った開発機（ESP32-S3、自作基板・PCBアンテナ）→ 検証済み。信号品質は市販品より明確に劣ることが判明（詳細は`docs/handoff.md`）
+- car-iot用に作った開発機（ESP32-S3、自作基板・PCBアンテナ）→ 検証済み・不採用。信号品質は市販品より明確に劣ることが判明（詳細は`docs/research_log.md`）
 - Seeed Studio XIAO ESP32C3（市販品、外付けアンテナ）→ 追加投入済み。`platformio.ini`の`env:xiao-c3`
 - M5AtomS3 Lite（ESP32-S3、市販品・外付けアンテナ、本来はSesame5⇔HA連携の本番機）→ 一時的にCSIテスト用ファームを書き込んで検証に使用中。**検証後は元のファームに書き戻す必要あり**
+- M5Stack NanoC6（ESP32-C6）→ 2026-08-30に1台購入、配送待ち。オンボードのセラミックアンテナの性能とLevel 2でのMACスタベーション耐性を検証予定（詳細は`docs/handoff.md`）
 
 ## ディレクトリ構成
 
@@ -35,7 +36,8 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 │   └── position_reporter/     # 位置報告用Androidアプリ(Flutter)
 └── docs/
     ├── verification_procedure.md   # ESPHome版の検証手順（参考）
-    └── handoff.md                  # 検証結果・経緯の詳細記録
+    ├── handoff.md                  # 現状把握・次のアクション（引き継ぎ用）
+    └── research_log.md             # 検証結果・経緯の詳細ログ
 ```
 
 ## 技術メモ
