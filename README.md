@@ -10,7 +10,7 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 ## 現在の方針
 
-- **本命ルート**：PlatformIOでEspressif公式`esp-csi`を参考にした自作ファームウェア（`src/main.cpp`）。MQTT等の外部連携は入れず、まずはシリアル出力で「CSIが実際に動きに反応するか」だけを検証する段階
+- **本命ルート**：PlatformIOでEspressif公式`esp-csi`を参考にした自作ファームウェア（`src/main.cpp`）。MQTT等の外部連携はまだ入れず、シリアル出力＋WiFi UDP（`tools/csi_listener`でPCへサブキャリア別振幅を送信）で「CSIが実際に動きに反応するか」を検証する段階。単一スカラー(rssi/avg_amp)だけでなく、サブキャリア単位への分解・フレネルゾーン理論に基づくノード配置最適化まで進んでいる（詳細は`docs/handoff.md`）
 - **参考/代替ルート**：ESPHome + `espectre`外部コンポーネントを使う方法も`esphome/`以下に残してある（HA連携が最初から付いてくる分、検証後にすぐ使える）
 
 ## 検証に使うハードウェア
@@ -23,14 +23,19 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 ```
 .
-├── platformio.ini          # PlatformIO設定（esp32-s3 / arduino framework）
+├── platformio.ini          # PlatformIO設定（env:esp32-s3, env:xiao-c3 / arduino framework）
 ├── src/
-│   └── main.cpp             # CSI単体検証用ファームウェア（シリアル出力のみ）
+│   ├── main.cpp              # CSI検証用ファームウェア（シリアル出力＋WiFi UDP）
+│   └── secrets.h.example     # WiFi認証情報のテンプレート（secrets.hにコピーして使う）
 ├── esphome/
 │   ├── csi_test_atoms3lite.yaml
 │   └── csi_test_cariot_devboard.yaml
+├── tools/
+│   ├── csi_listener/          # PC側受信スクリプト(Docker化)
+│   └── position_reporter/     # 位置報告用Androidアプリ(Flutter)
 └── docs/
-    └── verification_procedure.md   # ESPHome版の検証手順（参考）
+    ├── verification_procedure.md   # ESPHome版の検証手順（参考）
+    └── handoff.md                  # 検証結果・経緯の詳細記録
 ```
 
 ## 技術メモ
@@ -41,6 +46,11 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 ## 次のステップ
 
-1. `src/main.cpp` の `ssid`/`password` を実際の値に書き換えてcar-iot開発機に書き込み、シリアルモニタで `avg_amp` の値が動きに反応するか確認
-2. 反応が良さそうならM5AtomS3 Liteも巻き込んで2台構成でのゾーン分離検証へ
-3. 実用に足る精度が見えたら、Home Assistant連携（ESPHome版へ移行 or 自前でMQTT実装）を検討
+詳細な優先度つきリストは`docs/handoff.md`の「次のアクション候補」を参照。要点のみ：
+
+1. `diff_score`をサブキャリア0〜50帯（Legacy LTF）限定に改修し、動き検知の精度改善を実機で確認
+2. 「移動方向（サブキャリアの乱れの順序）＋静止位置（ノード間rssi差分）」を組み合わせたトラッキングの試作
+3. 経路遮蔽仮説の複数回再現性確認
+4. 実用に足る精度が見えたら、Home Assistant連携（ESPHome版へ移行 or 自前でMQTT実装）を検討
+
+セットアップ手順：`src/secrets.h.example`を`secrets.h`にコピーしてWiFi認証情報を入れてからビルドする（`secrets.h`は`.gitignore`済み）。

@@ -1,12 +1,10 @@
 // ============================================================
-// WiFi CSI 単体検証用（MQTTなし・シリアル出力のみ）
-// car-iot開発機（ESP32-S3）想定
+// WiFi CSI 検証用ファームウェア（MQTTなし）
+// env:esp32-s3（car-iot機・M5AtomS3 Lite）/ env:xiao-c3（XIAO ESP32C3）共用
 //
-// 注意：これはEspressif公式 esp-csi の get-started サンプルを参考にした
-// 簡易版で、コンパイル確認まではできていません。esp-idf/Arduinoコアの
-// バージョンによって wifi_csi_config_t / wifi_csi_info_t のフィールド名が
-// 変わることがあるので、コンパイルエラーが出たら esp_wifi_types.h の
-// 実際の定義を見て調整してください。
+// Espressif公式 esp-csi の get-started サンプルを参考に作成。
+// シリアルに rssi/avg_amp/diff_score/filt を出力するほか、
+// サブキャリアごとの振幅をWiFi UDPでPC(tools/csi_listener)へ送信する。
 //
 // [MACフィルタ] info->mac（CSIデータの送信元MAC）が接続中APのBSSIDと
 // 一致するパケットだけを採用するようにしてある。同一チャンネル上の
