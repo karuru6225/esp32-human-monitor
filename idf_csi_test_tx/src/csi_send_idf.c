@@ -24,6 +24,9 @@
 #include "esp_now.h"
 
 #define WIFI_CHANNEL 11
+/* RX側で受信を100Hzのまま受け続け、AVERAGE_WINDOW個ごとに平均して
+   出力する方式に変更したため、送信側は100Hzに戻す
+   （詳細はidf_csi_test/src/csi_recv_idf.c参照） */
 #define SEND_FREQUENCY_HZ 100
 
 /* RX側（idf_csi_test/src/csi_recv_idf.c）がinfo->macでフィルタする値と一致させる */
