@@ -3,8 +3,11 @@ services:
     build: ./backend
     ports:
       - "8765:8765"
-    devices:
-      - "/dev/ttyACM0:/dev/ttyACM0"
+    environment:
+      - CSI_SOURCE=tcp
+      - CSI_TCP_SOURCES=A:host.docker.internal:9000,B:host.docker.internal:9001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   frontend:

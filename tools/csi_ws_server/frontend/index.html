@@ -30,6 +30,13 @@
     color: #000;
     border-color: #3a6;
   }
+  select {
+    background: #222;
+    color: #ddd;
+    border: 1px solid #444;
+    padding: 5px 8px;
+    font-family: monospace;
+  }
   #status {
     color: #888;
   }
@@ -45,6 +52,9 @@
     <button id="btn-waterfall">waterfall</button>
     <button id="btn-spectrum" class="active">spectrum</button>
     <button id="btn-scatter">scatter (IQ)</button>
+    <button id="btn-rssi">rssi (全ノード)</button>
+    <span>ノード(waterfall/spectrum/scatter用):</span>
+    <select id="node-select"></select>
     <span id="status">connecting...</span>
   </div>
   <canvas id="canvas" width="1200" height="700"></canvas>
@@ -57,23 +67,52 @@ const statusEl = document.getElementById("status");
 const btnWaterfall = document.getElementById("btn-waterfall");
 const btnSpectrum = document.getElementById("btn-spectrum");
 const btnScatter = document.getElementById("btn-scatter");
+const btnRssi = document.getElementById("btn-rssi");
+const nodeSelect = document.getElementById("node-select");
 
 let mode = "spectrum";
 btnWaterfall.onclick = () => setMode("waterfall");
 btnSpectrum.onclick = () => setMode("spectrum");
 btnScatter.onclick = () => setMode("scatter");
+btnRssi.onclick = () => setMode("rssi");
 function setMode(m) {
   mode = m;
   btnWaterfall.classList.toggle("active", m === "waterfall");
   btnSpectrum.classList.toggle("active", m === "spectrum");
   btnScatter.classList.toggle("active", m === "scatter");
+  btnRssi.classList.toggle("active", m === "rssi");
 }
 
-// ---- waterfall用の履歴バッファ ----
-const HISTORY_LEN = 150; // 約150フレーム分(10Hzなら約15秒)
-let history = []; // 各要素: {imag:[...], real:[...], amp:[...]}
-let latest = null;
+// ---- ノードごとの状態(複数RXを同時購読、"node"フィールドで区別) ----
+const RSSI_WINDOW_MS = 120000; // 直近2分をスクロール表示
+const RSSI_MA_WINDOW = 10;     // 移動平均のサンプル数(10Hz相当で約1秒)
+const HISTORY_LEN = 150;       // waterfall用、約150フレーム分(10Hzなら約15秒)
+const NODE_COLORS = ["#3af", "#f83", "#8f3", "#f3f", "#ff3"];
+
+const nodes = {}; // label -> {latest, history, rssiHistory}
+let selectedNode = null;
 let frameCount = 0;
+
+function getNode(label) {
+  if (!nodes[label]) {
+    nodes[label] = { latest: null, history: [], rssiHistory: [] };
+    const opt = document.createElement("option");
+    opt.value = label;
+    opt.textContent = label;
+    nodeSelect.appendChild(opt);
+    if (!selectedNode) {
+      selectedNode = label;
+      nodeSelect.value = label;
+    }
+  }
+  return nodes[label];
+}
+nodeSelect.onchange = () => { selectedNode = nodeSelect.value; };
+
+function colorFor(label) {
+  const idx = Object.keys(nodes).indexOf(label);
+  return NODE_COLORS[idx % NODE_COLORS.length];
+}
 
 // 振幅の色マッピング(0-50を想定、外れたらクランプ)
 function ampColor(a) {
@@ -95,6 +134,8 @@ function bandColor(idx, numSc) {
 function drawWaterfall() {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!selectedNode) return;
+  const history = nodes[selectedNode].history;
   if (history.length === 0) return;
 
   const numSc = history[history.length - 1].amp.length;
@@ -132,7 +173,8 @@ function drawWaterfall() {
 function drawSpectrum() {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!latest) return;
+  if (!selectedNode || !nodes[selectedNode].latest) return;
+  const latest = nodes[selectedNode].latest;
 
   const numSc = latest.amp.length;
   const yMax = 60; // 縦軸の想定最大振幅
@@ -193,7 +235,8 @@ function drawSpectrum() {
 function drawScatter() {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!latest) return;
+  if (!selectedNode || !nodes[selectedNode].latest) return;
+  const latest = nodes[selectedNode].latest;
 
   const numSc = latest.imag.length;
   const range = 40; // I/Qの表示レンジ(-40〜40)
@@ -218,9 +261,113 @@ function drawScatter() {
   }
 }
 
+function movingAverage(arr, window) {
+  const out = new Array(arr.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) {
+    sum += arr[i];
+    if (i >= window) sum -= arr[i - window];
+    if (i >= window - 1) out[i] = sum / window;
+  }
+  return out;
+}
+
+function drawRssi() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const labels = Object.keys(nodes).filter((l) => nodes[l].rssiHistory.length >= 2);
+  if (labels.length === 0) return;
+
+  const marginLeft = 50;
+  const marginBottom = 30;
+  const marginTop = 24; // 凡例スペース
+  const plotW = canvas.width - marginLeft - 10;
+  const plotH = canvas.height - marginBottom - marginTop;
+
+  const now = Math.max(...labels.map((l) => {
+    const h = nodes[l].rssiHistory;
+    return h[h.length - 1].t;
+  }));
+  const tMin = now - RSSI_WINDOW_MS;
+
+  const allRssi = labels.flatMap((l) => nodes[l].rssiHistory.map((p) => p.rssi));
+  let yMin = Math.min(...allRssi) - 2;
+  let yMax = Math.max(...allRssi) + 2;
+  if (yMax - yMin < 6) { const mid = (yMax + yMin) / 2; yMin = mid - 3; yMax = mid + 3; }
+
+  function xOf(t) { return marginLeft + ((t - tMin) / RSSI_WINDOW_MS) * plotW; }
+  function yOf(r) { return marginTop + (1 - (r - yMin) / (yMax - yMin)) * plotH; }
+
+  // 軸
+  ctx.strokeStyle = "#444";
+  ctx.beginPath();
+  ctx.moveTo(marginLeft, marginTop);
+  ctx.lineTo(marginLeft, marginTop + plotH);
+  ctx.lineTo(marginLeft + plotW, marginTop + plotH);
+  ctx.stroke();
+
+  // Y軸目盛(グリッド)
+  ctx.font = "11px monospace";
+  const yStep = Math.max(1, Math.round((yMax - yMin) / 6));
+  for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+    const y = yOf(v);
+    ctx.strokeStyle = "#222";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, y);
+    ctx.lineTo(marginLeft + plotW, y);
+    ctx.stroke();
+    ctx.fillStyle = "#666";
+    ctx.textAlign = "right";
+    ctx.fillText(String(v), marginLeft - 6, y + 4);
+  }
+  ctx.textAlign = "left";
+
+  // ノードごとに生データ(細線)+移動平均(太線)を重ね描き
+  labels.forEach((label, idx) => {
+    const n = nodes[label];
+    const color = colorFor(label);
+    const rssiVals = n.rssiHistory.map((p) => p.rssi);
+
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    n.rssiHistory.forEach((p, i) => {
+      const x = xOf(p.t), y = yOf(p.rssi);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const ma = movingAverage(rssiVals, RSSI_MA_WINDOW);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let started = false;
+    n.rssiHistory.forEach((p, i) => {
+      if (ma[i] === null) return;
+      const x = xOf(p.t), y = yOf(ma[i]);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.lineWidth = 1;
+
+    // 凡例
+    ctx.fillStyle = color;
+    ctx.fillRect(marginLeft + idx * 70, 4, 10, 10);
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(label, marginLeft + idx * 70 + 14, 13);
+  });
+
+  ctx.fillStyle = "#888";
+  ctx.fillText(`rssi [dBm] — 直近${RSSI_WINDOW_MS / 1000}秒、太線=移動平均(${RSSI_MA_WINDOW}サンプル)`, marginLeft, canvas.height - 10);
+}
+
 function render() {
   if (mode === "waterfall") drawWaterfall();
   else if (mode === "spectrum") drawSpectrum();
+  else if (mode === "rssi") drawRssi();
   else drawScatter();
   requestAnimationFrame(render);
 }
@@ -236,12 +383,20 @@ function connect() {
   ws.onerror = () => { ws.close(); };
   ws.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
+    const label = d.node || "?";
+    const n = getNode(label);
+
     const amp = d.imag.map((im, i) => Math.sqrt(im * im + d.real[i] * d.real[i]));
-    latest = { imag: d.imag, real: d.real, amp };
-    history.push(latest);
-    if (history.length > HISTORY_LEN) history.shift();
+    n.latest = { imag: d.imag, real: d.real, amp };
+    n.history.push(n.latest);
+    if (n.history.length > HISTORY_LEN) n.history.shift();
+
+    const now = performance.now();
+    n.rssiHistory.push({ t: now, rssi: d.rssi });
+    while (n.rssiHistory.length && now - n.rssiHistory[0].t > RSSI_WINDOW_MS) n.rssiHistory.shift();
+
     frameCount++;
-    statusEl.textContent = `connected | seq=${d.seq} rssi=${d.rssi} frames=${frameCount} sc=${d.imag.length}`;
+    statusEl.textContent = `connected | nodes=${Object.keys(nodes).join(",")} frames=${frameCount} last=${label}:${d.rssi}dBm`;
   };
 }
 connect();
