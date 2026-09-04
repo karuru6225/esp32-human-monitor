@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>SDCSI live viewer</title>
+<style>
+  body {
+    background: #111;
+    color: #ddd;
+    font-family: monospace;
+    margin: 0;
+    padding: 12px;
+  }
+  #bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  button {
+    background: #222;
+    color: #ddd;
+    border: 1px solid #444;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+  }
+  button.active {
+    background: #3a6;
+    color: #000;
+    border-color: #3a6;
+  }
+  #status {
+    color: #888;
+  }
+  canvas {
+    background: #000;
+    display: block;
+    border: 1px solid #333;
+  }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <button id="btn-waterfall">waterfall</button>
+    <button id="btn-spectrum" class="active">spectrum</button>
+    <button id="btn-scatter">scatter (IQ)</button>
+    <span id="status">connecting...</span>
+  </div>
+  <canvas id="canvas" width="1200" height="700"></canvas>
+
+<script>
+const WS_URL = "ws://" + location.hostname + ":8765";
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const btnWaterfall = document.getElementById("btn-waterfall");
+const btnSpectrum = document.getElementById("btn-spectrum");
+const btnScatter = document.getElementById("btn-scatter");
+
+let mode = "spectrum";
+btnWaterfall.onclick = () => setMode("waterfall");
+btnSpectrum.onclick = () => setMode("spectrum");
+btnScatter.onclick = () => setMode("scatter");
+function setMode(m) {
+  mode = m;
+  btnWaterfall.classList.toggle("active", m === "waterfall");
+  btnSpectrum.classList.toggle("active", m === "spectrum");
+  btnScatter.classList.toggle("active", m === "scatter");
+}
+
+// ---- waterfall用の履歴バッファ ----
+const HISTORY_LEN = 150; // 約150フレーム分(10Hzなら約15秒)
+let history = []; // 各要素: {imag:[...], real:[...], amp:[...]}
+let latest = null;
+let frameCount = 0;
+
+// 振幅の色マッピング(0-50を想定、外れたらクランプ)
+function ampColor(a) {
+  const v = Math.max(0, Math.min(50, a)) / 50; // 0-1
+  // 黒->青->緑->黄->赤 的なヒートマップ
+  const r = Math.round(255 * Math.min(1, Math.max(0, (v - 0.5) * 2)));
+  const g = Math.round(255 * Math.min(1, Math.max(0, 1 - Math.abs(v - 0.5) * 2)));
+  const b = Math.round(255 * Math.min(1, Math.max(0, (0.5 - v) * 2)));
+  return `rgb(${r},${g},${b})`;
+}
+
+// LTFセグメント(#17の境界)で色分け: 0-63/64-127/128-191
+function bandColor(idx, numSc) {
+  if (idx < 64) return "#e74c3c";        // LLTF
+  if (idx < 128) return "#2ecc71";       // HT-LTF
+  return "#f39c12";                       // STBC-HT-LTF
+}
+
+function drawWaterfall() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (history.length === 0) return;
+
+  const numSc = history[history.length - 1].amp.length;
+  const marginBottom = 30;
+  const plotH = canvas.height - marginBottom;
+  const cellW = canvas.width / numSc;
+  const cellH = plotH / HISTORY_LEN;
+
+  // 新しいフレームほど下に描く(プロット領域の下端が最新)
+  const startRow = HISTORY_LEN - history.length;
+  for (let row = 0; row < history.length; row++) {
+    const frame = history[row];
+    const y = (startRow + row) * cellH;
+    for (let i = 0; i < numSc; i++) {
+      ctx.fillStyle = ampColor(frame.amp[i]);
+      ctx.fillRect(i * cellW, y, cellW + 1, cellH + 1);
+    }
+  }
+
+  // X軸目盛(サブキャリア番号)
+  const step = numSc <= 64 ? 8 : 16;
+  ctx.fillStyle = "#888";
+  ctx.font = "10px monospace";
+  ctx.textAlign = "center";
+  for (let i = 0; i < numSc; i += step) {
+    const x = i * cellW + cellW / 2;
+    ctx.fillText(String(i), x, plotH + 14);
+  }
+  ctx.textAlign = "left";
+  ctx.fillText("subcarrier index →", 4, canvas.height - 10);
+}
+
+// 横軸=サブキャリア番号(周波数)、縦軸=振幅の棒グラフ。教科書等でよく見る
+// 「サブキャリアごとの振幅」表示そのもの。直近1フレームを毎回描き直す
+function drawSpectrum() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!latest) return;
+
+  const numSc = latest.amp.length;
+  const yMax = 60; // 縦軸の想定最大振幅
+  const marginBottom = 30;
+  const marginLeft = 40;
+  const plotW = canvas.width - marginLeft;
+  const plotH = canvas.height - marginBottom;
+  const barW = plotW / numSc;
+
+  // 軸
+  ctx.strokeStyle = "#444";
+  ctx.beginPath();
+  ctx.moveTo(marginLeft, 0);
+  ctx.lineTo(marginLeft, plotH);
+  ctx.lineTo(canvas.width, plotH);
+  ctx.stroke();
+
+  // Y軸目盛
+  ctx.fillStyle = "#666";
+  ctx.font = "11px monospace";
+  for (let v = 0; v <= yMax; v += 20) {
+    const y = plotH - (v / yMax) * plotH;
+    ctx.fillText(String(v), 4, y + 4);
+    ctx.strokeStyle = "#222";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  // 棒グラフ(LTFセグメントごとに色分け)
+  for (let i = 0; i < numSc; i++) {
+    const h = Math.min(1, latest.amp[i] / yMax) * plotH;
+    ctx.fillStyle = bandColor(i, numSc);
+    ctx.fillRect(marginLeft + i * barW, plotH - h, Math.max(1, barW - 0.5), h);
+  }
+
+  // X軸目盛(サブキャリア番号)。10刻みくらいで間引いて表示
+  const step = numSc <= 64 ? 8 : 16;
+  ctx.fillStyle = "#888";
+  ctx.font = "10px monospace";
+  ctx.textAlign = "center";
+  for (let i = 0; i < numSc; i += step) {
+    const x = marginLeft + i * barW + barW / 2;
+    ctx.strokeStyle = "#222";
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, plotH);
+    ctx.stroke();
+    ctx.fillText(String(i), x, plotH + 14);
+  }
+  ctx.textAlign = "left";
+
+  ctx.fillStyle = "#888";
+  ctx.fillText("subcarrier index →", marginLeft, canvas.height - 10);
+}
+
+function drawScatter() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!latest) return;
+
+  const numSc = latest.imag.length;
+  const range = 40; // I/Qの表示レンジ(-40〜40)
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const scale = Math.min(canvas.width, canvas.height) / (2 * range);
+
+  // 軸線
+  ctx.strokeStyle = "#333";
+  ctx.beginPath();
+  ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+  ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+  ctx.stroke();
+
+  for (let i = 0; i < numSc; i++) {
+    const x = cx + latest.real[i] * scale;
+    const y = cy - latest.imag[i] * scale;
+    ctx.fillStyle = bandColor(i, numSc);
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function render() {
+  if (mode === "waterfall") drawWaterfall();
+  else if (mode === "spectrum") drawSpectrum();
+  else drawScatter();
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+function connect() {
+  const ws = new WebSocket(WS_URL);
+  ws.onopen = () => { statusEl.textContent = "connected"; };
+  ws.onclose = () => {
+    statusEl.textContent = "disconnected, retrying...";
+    setTimeout(connect, 1000);
+  };
+  ws.onerror = () => { ws.close(); };
+  ws.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    const amp = d.imag.map((im, i) => Math.sqrt(im * im + d.real[i] * d.real[i]));
+    latest = { imag: d.imag, real: d.real, amp };
+    history.push(latest);
+    if (history.length > HISTORY_LEN) history.shift();
+    frameCount++;
+    statusEl.textContent = `connected | seq=${d.seq} rssi=${d.rssi} frames=${frameCount} sc=${d.imag.length}`;
+  };
+}
+connect();
+</script>
+</body>
+</html>
