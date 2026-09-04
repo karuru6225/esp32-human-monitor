@@ -1,0 +1,14 @@
+{
+  "folders": [
+	{
+		"path": "."
+	},
+	{
+		"path": "idf_csi_test"
+	},
+	{
+		"path": "idf_csi_test_tx"
+	}
+],
+  "settings": {}
+}
