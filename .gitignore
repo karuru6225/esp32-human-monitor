@@ -4,3 +4,7 @@ secrets.yaml
 secrets.h
 logs/
 tools/csi_listener/data/
+
+# ESP-IDFが自動生成する設定スナップショット（sdkconfig.defaultsから再生成可能）
+sdkconfig.*
+!sdkconfig.defaults

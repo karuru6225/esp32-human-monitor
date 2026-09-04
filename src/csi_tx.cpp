@@ -1,12 +1,11 @@
 // ============================================================
 // SpecificDeviceCSI: 送信専用ファームウェア（TX）— 診断版
 //
-// 【診断中】AP非接続のpromiscuous構成ではRX側でCSIコールバックが
-// 一度も発火しない問題が起きたため、「STAがAP接続(アソシエート)
-// 済みであることがCSI取得の必要条件では」という仮説を確かめる版。
-// TX/RXとも実家WiFi APに接続した状態を維持しつつ、ESP-NOWで
-// ユニキャスト送信する。原因が確認でき次第、AP非依存の構成に戻す
-// か、この構成のまま清書するかを判断する。
+// AP非接続、ESP-NOWでRX宛のユニキャストを送り続けるだけの構成。
+// 元祖ESP32(RX)でCSIコールバックがほぼ発火しない問題を確認済み
+// （#22）。この版はRXのチップを変えて同じ条件で切り分けるための
+// ベースライン（TXは元祖ESP32=ATOM Liteのまま固定し、RXだけ
+// AtomS3 Lite(ESP32-S3)等に差し替えて検証する）。
 //
 // 対象: M5Stack ATOM Lite（ESP32無印）。
 // ============================================================
@@ -19,15 +18,12 @@ extern "C"
 #include "esp_wifi.h"
 }
 
-#include "secrets.h"
-
-// 診断用: 元祖ESP32はブロードキャストではCSIが取れない疑い(esp-csi issue #247)
-// があるため、ブロードキャストではなくRX宛のユニキャストで送る版。
 // 固定MACはTX/RXそれぞれ別の値にする（RX側がinfo->macで送信元を
 // フィルタするための固定値でもある）。
 static const uint8_t TX_MAC[6] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x01};
 static const uint8_t RX_MAC[6] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x02};
 
+static const uint8_t WIFI_CHANNEL = 11;
 static const int SEND_FREQUENCY_HZ = 100;
 
 void setup()
@@ -37,21 +33,14 @@ void setup()
 
   WiFi.mode(WIFI_STA);
   esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
   esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
   esp_err_t mac_err = esp_wifi_set_mac(WIFI_IF_STA, TX_MAC);
   if (mac_err != ESP_OK)
   {
     Serial.printf("esp_wifi_set_mac failed: %s\n", esp_err_to_name(mac_err));
   }
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println(" connected!");
 
   esp_err_t err = esp_now_init();
   if (err != ESP_OK)
@@ -61,7 +50,7 @@ void setup()
   esp_now_set_pmk((uint8_t *)"pmk1234567890123");
 
   esp_now_peer_info_t peer = {};
-  peer.channel = 0; // 0=現在STAが接続中のチャンネルを使う
+  peer.channel = WIFI_CHANNEL;
   peer.ifidx = WIFI_IF_STA;
   peer.encrypt = false;
   memcpy(peer.peer_addr, RX_MAC, 6);
@@ -80,7 +69,7 @@ void setup()
   wifi_second_chan_t actual_second_chan;
   esp_wifi_get_channel(&actual_channel, &actual_second_chan);
 
-  Serial.println("================ CSI SEND (AP-connected + unicast) ================");
+  Serial.println("================ CSI SEND (AP非接続 + unicast) ================");
   Serial.printf("wifi_channel(actual)=%d(2nd=%d) send_frequency=%dHz tx_mac=%02X:%02X:%02X:%02X:%02X:%02X rx_mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
                 actual_channel, actual_second_chan, SEND_FREQUENCY_HZ,
                 TX_MAC[0], TX_MAC[1], TX_MAC[2], TX_MAC[3], TX_MAC[4], TX_MAC[5],

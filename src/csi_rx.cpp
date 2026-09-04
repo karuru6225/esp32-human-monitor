@@ -1,16 +1,16 @@
 // ============================================================
 // SpecificDeviceCSI: 受信専用ファームウェア（RX）— 診断版
 //
-// 【診断中】AP非接続promiscuous構成ではCSIコールバックが一度も
-// 発火しなかったため、「STAがAP接続(アソシエート)済みであることが
-// CSI取得の必要条件では」という仮説を確かめる版。実家WiFi APに
-// 接続した状態を維持しつつ、TX（csi_tx.cpp）からのESP-NOWユニキャストを
-// 受信してCSIが取れるか確認する。取得したCSIはUSBシリアルへCSV形式で
-// ダンプする（PC側の受信ツールは別途必要、tools/csi_listenerとは別経路）。
+// AP非接続・promiscuousモードでTX（csi_tx.cpp）からのESP-NOW
+// ユニキャストを受信してCSIが取れるか確認する。取得したCSIは
+// USBシリアルへCSV形式でダンプする
+// （PC側の受信ツールは別途必要、tools/csi_listenerとは別経路）。
 //
-// 対象: M5Stack ATOM Lite（ESP32無印）。公式サンプルにあった
-// S3/C3/C5/C6固有の分岐・ゲイン補正(esp_csi_gain_ctrl)は
-// 対象外なので削除している。
+// 元祖ESP32(ATOM Lite)ではCSIコールバックがほぼ発火しないことを
+// 確認済み（#22）。このファイルはチップ非依存のAPIのみ使っており
+// （wifi_csi_config_tの構造体はESP32無印/S3/C3で共通）、
+// env側でboardをAtomS3 Lite(esp32-s3-devkitc-1)等に切り替えれば
+// そのまま使い回してチップ差の検証に使える（`env:atoms3-lite-rx`）。
 // ============================================================
 #include <Arduino.h>
 #include <WiFi.h>
@@ -22,15 +22,13 @@ extern "C"
 #include "esp_wifi.h"
 }
 
-#include "secrets.h"
-
-// 診断用: ブロードキャストではなくTX→RXのユニキャストで送る版
-// （csi_tx.cppと対の変更、詳細はそちらのコメント参照）。
 // TX_MAC: TX側（csi_tx.cpp）が自分のSTA MACをこの値に上書きしているので、
 //         info->macがこれと一致するパケットだけをTX由来のCSIとして扱う。
 // RX_MAC: 自分（RX）のSTA MAC。TXはここ宛にユニキャストしてくる。
 static const uint8_t TX_MAC[6] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x01};
 static const uint8_t RX_MAC[6] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x02};
+
+static const uint8_t WIFI_CHANNEL = 11;
 
 static uint32_t s_count = 0;
 static uint32_t s_total_cb = 0;
@@ -102,21 +100,14 @@ void setup()
 
   WiFi.mode(WIFI_STA);
   esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
   esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
   esp_err_t mac_err = esp_wifi_set_mac(WIFI_IF_STA, RX_MAC);
   if (mac_err != ESP_OK)
   {
     Serial.printf("esp_wifi_set_mac failed: %s\n", esp_err_to_name(mac_err));
   }
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println(" connected!");
 
   esp_err_t err = esp_now_init();
   if (err != ESP_OK)
@@ -126,7 +117,7 @@ void setup()
   esp_now_set_pmk((uint8_t *)"pmk1234567890123");
 
   esp_now_peer_info_t peer = {};
-  peer.channel = 0; // 0=現在STAが接続中のチャンネルを使う
+  peer.channel = WIFI_CHANNEL;
   peer.ifidx = WIFI_IF_STA;
   peer.encrypt = false;
   memcpy(peer.peer_addr, TX_MAC, 6);
@@ -141,9 +132,7 @@ void setup()
   // esp-idfのESP-NOW APIには存在しない（より新しいidfで追加されたAPI）
   // ため省略。デフォルトレートで動作させる。
 
-  // ---- CSI設定 ----
-  // 【診断中】AP接続済み状態でもTX(別ノード)からのユニキャストCSIが
-  // 拾えるか確認するための構成。promiscuousは念のため併用する
+  // ---- CSI設定（AP非接続なのでpromiscuousモード必須）----
   esp_wifi_set_promiscuous_rx_cb(wifi_promisc_rx_cb); // デバッグ用
 
   wifi_csi_config_t csi_config = {
@@ -182,7 +171,7 @@ void setup()
   esp_wifi_get_channel(&actual_channel, &actual_second_chan);
   bool promisc_en = false;
   esp_wifi_get_promiscuous(&promisc_en);
-  Serial.println("================ CSI RECV: boot done (unicast) ================");
+  Serial.println("================ CSI RECV: boot done (AP非接続 + unicast) ================");
   Serial.printf("wifi_channel(actual)=%d(2nd=%d) own_mac=%02X:%02X:%02X:%02X:%02X:%02X filter_mac(tx)=%02X:%02X:%02X:%02X:%02X:%02X promiscuous=%d\n",
                 actual_channel, actual_second_chan,
                 own_mac[0], own_mac[1], own_mac[2], own_mac[3], own_mac[4], own_mac[5],
