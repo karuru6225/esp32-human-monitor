@@ -18,7 +18,7 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 - car-iot用に作った開発機（ESP32-S3、自作基板・PCBアンテナ）→ 検証済み・不採用。信号品質は市販品より明確に劣ることが判明（詳細は`docs/research_log.md`）
 - Seeed Studio XIAO ESP32C3（市販品、外付けアンテナ）→ 追加投入済み。`platformio.ini`の`env:xiao-c3`
-- M5AtomS3 Lite（ESP32-S3、市販品・内蔵3Dアンテナ、本来はSesame5⇔HA連携の本番機）→ 一時的にCSIテスト用ファームを書き込んで検証に使用中。**検証後は元のファームに書き戻す必要あり**
+- M5AtomS3 Lite（ESP32-S3、市販品・内蔵3Dアンテナ、本来はSesame5⇔HA連携の本番機）→ 検証時はCSIテスト用ファームを書き込んで使用（検証後の本番ファーム書き戻しは都度実施）
 - M5Stack NanoC6（ESP32-C6）→ **採用断念（2026-08-31）**。PlatformIOの標準ビルド環境がESP32-C6のArduinoフレームワークに未対応で、回避策も環境破壊のリスクが高く見合わないと判断（詳細は`docs/handoff.md`）
 - M5Stack ATOM Lite（ESP32無印、内蔵3Dアンテナ）3台→ NanoC6の代替として追加購入・実機検証済み。RouterCSI方式でのチップ非依存性・rssi移動平均による移動方向判定を確認（`#21`）、SpecificDeviceCSI方式でもTX/RXとも問題なく動作しATOM Liteだけで構成可能と確認済み（`#26`）。TXはPC非接続の単体運用が可能（起動確認用にGPIO27の内蔵RGB LEDを緑点灯）
 
@@ -60,7 +60,6 @@ Home AssistantとESP32を使った、部屋の活動ログ・人感センシン�
 
 詳細な優先度つきリストは`docs/handoff.md`の「次のアクション候補」を参照。要点のみ：
 
-0. M5AtomS3 Liteへの本番ファーム書き戻し（Sesame5⇔HA連携の中継機能が止まっている）
 1. SpecificDeviceCSIで実際の位置推定を試す（ラベル付きデータ収集→diff_score等の指標がRouterCSIと同様に効くか検証。TX1台+RX複数台のブロードキャスト型構成への発展も視野）
 2. `diff_score`をサブキャリア0〜50帯（Legacy LTF）限定に改修し、動き検知の精度改善を実機で確認
 3. 経路遮蔽仮説・C3サブキャリア形状によるドリフト補正の複数回再現性確認
