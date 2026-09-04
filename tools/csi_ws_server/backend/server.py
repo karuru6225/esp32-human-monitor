@@ -76,11 +76,12 @@ async def tcp_reader(node, host, port):
             while True:
                 line = await reader.readline()
                 if not line:
+                    print(f"[{node}] tcp source closed, retrying in 2s", flush=True)
                     break
                 await broadcast_line(node, line)
         except Exception as e:
             print(f"[{node}] tcp source error: {e}, retrying in 2s", flush=True)
-            await asyncio.sleep(2)
+        await asyncio.sleep(2)
 
 
 async def handler(websocket):

@@ -51,9 +51,9 @@
   <div id="bar">
     <button id="btn-waterfall">waterfall</button>
     <button id="btn-spectrum" class="active">spectrum</button>
-    <button id="btn-scatter">scatter (IQ)</button>
+    <button id="btn-scatter">scatter (IQ, 全ノード)</button>
     <button id="btn-rssi">rssi (全ノード)</button>
-    <span>ノード(waterfall/spectrum/scatter用):</span>
+    <span>ノード(waterfall/spectrum用):</span>
     <select id="node-select"></select>
     <span id="status">connecting...</span>
   </div>
@@ -232,13 +232,16 @@ function drawSpectrum() {
   ctx.fillText("subcarrier index →", marginLeft, canvas.height - 10);
 }
 
-function drawScatter() {
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!selectedNode || !nodes[selectedNode].latest) return;
-  const latest = nodes[selectedNode].latest;
+const SCATTER_FADE_ALPHA = 0.06; // 残光の減衰率(小さいほど尾を引く)
 
-  const numSc = latest.imag.length;
+function drawScatter() {
+  // 完全クリアでなく薄い黒を重ねてフェードさせ、残光(フォスファ)っぽく見せる
+  ctx.fillStyle = `rgba(0,0,0,${SCATTER_FADE_ALPHA})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const labels = Object.keys(nodes).filter((l) => nodes[l].latest);
+  if (labels.length === 0) return;
+
   const range = 40; // I/Qの表示レンジ(-40〜40)
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
@@ -251,14 +254,27 @@ function drawScatter() {
   ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
   ctx.stroke();
 
-  for (let i = 0; i < numSc; i++) {
-    const x = cx + latest.real[i] * scale;
-    const y = cy - latest.imag[i] * scale;
-    ctx.fillStyle = bandColor(i, numSc);
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // ノードごとに色分けして重ね描き
+  labels.forEach((label, idx) => {
+    const latest = nodes[label].latest;
+    const color = colorFor(label);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.7;
+    for (let i = 0; i < latest.imag.length; i++) {
+      const x = cx + latest.real[i] * scale;
+      const y = cy - latest.imag[i] * scale;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 凡例
+    ctx.fillRect(8 + idx * 70, 8, 10, 10);
+    ctx.fillStyle = "#ccc";
+    ctx.font = "11px monospace";
+    ctx.fillText(label, 8 + idx * 70 + 14, 17);
+  });
 }
 
 function movingAverage(arr, window) {

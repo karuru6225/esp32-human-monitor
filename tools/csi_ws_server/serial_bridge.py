@@ -35,8 +35,8 @@ def main():
                 data = ser.read(ser.in_waiting or 1)
                 if data:
                     conn.sendall(data)
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            print("client disconnected", flush=True)
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            print(f"client disconnected: {type(e).__name__}: {e}", flush=True)
         finally:
             conn.close()
 
