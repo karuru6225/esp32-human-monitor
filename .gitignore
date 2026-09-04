@@ -8,3 +8,7 @@ tools/csi_listener/data/
 # ESP-IDFが自動生成する設定スナップショット（sdkconfig.defaultsから再生成可能）
 sdkconfig.*
 !sdkconfig.defaults
+
+# ESP-IDF Component Managerが取得する依存コンポーネントの実体
+# （idf_component.yml + dependencies.lockから再生成可能）
+managed_components/

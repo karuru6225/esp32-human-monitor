@@ -1,4 +1,4 @@
-# 引き継ぎメモ（2026-09-03時点）
+# 引き継ぎメモ（2026-09-04時点）
 
 このプロジェクトの「今どういう状態で、次に何をすべきか」をまとめたもの。
 README.mdが「プロジェクト概要」だとすると、こちらは「作業を引き継ぐための現状把握」の記録。
@@ -85,7 +85,7 @@ Espressif公式`esp-csi`リポジトリ（[github.com/espressif/esp-csi](https:/
 ## 次のアクション候補（優先度つき）
 
 0. **【要対応・最優先】M5AtomS3 Liteへの本番ファーム書き戻し**：Sesame5⇔HA連携の中継機能が止まっているので、検証が一段落し次第、元のファームに書き戻すこと
-1. **【解決済み・要clean up】SpecificDeviceCSIはArduino frameworkでは機能しない。素のESP-IDFなら動作確認済み**：`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版）ではAP非接続+promiscuousでCSIコールバックがほぼ発火しない問題があり（`#22`）、チップをAtomS3 Lite(S3)に変えても再現した（`#23`）。原因はチップではなく**Arduinoのesp_now実装に送信レート明示指定API`esp_now_set_peer_rate_config()`が存在しないこと**だった。独立プロジェクト`idf_csi_test/`（RX=AtomS3 Lite）・`idf_csi_test_tx/`（TX=元祖ESP32、いずれも`framework=espidf`）で、①`sdkconfig.defaults`に`CONFIG_ESP_WIFI_CSI_ENABLED=y`を追加②TX/RX双方に`esp_now_set_peer_rate_config()`（HT40/MCS0_LGI）を追加、の2点を直したところ`csi_matched`がTXの送信レート(100Hz)とほぼ1:1で取れるようになった（`#24`）。実データのCSV出力パイプラインも構築済み（`#25`）：CSIコールバック内直接printfでのウォッチドッグ発火→キュー化、印字タスクのCPU1固定、全サブキャリア出力時の実効スループット不足（シリアル出力チャネル自体がボトルネック、書式化の軽量化では改善せず）→コールバック内で100Hzのまま受けつつAVERAGE_WINDOW(10)回分をバイト単位平均して1本だけ出力、という3段階の問題を解決し、`dropped=0`で安定。出力形式は`CSI_HEX,<seq>,<rssi>,<生I/Q整数のhex文字列>`（振幅計算はPC側で行う設計）。**リアルタイム可視化ツール`tools/csi_ws_server/`も構築済み**（Python WebSocketサーバー+nginx配信のHTML、docker-composeで起動。waterfall/spectrum/scatterの3モード）。**RXは元祖ESP32(ATOM Lite)でも動作確認済み**（`#26`）——チップに依存せず、TX/RXともATOM Liteだけで構成できる（ただし元祖ESP32側は外付けFTDI経由の実UARTのため、高ボーレート化(921600/2000000)ではS3のネイティブUSBと違い文字化けする問題が残っており、当面115200運用）。USBパススルー（`usbipd-win`でWindows→WSL2→Dockerへ）の手順も確立済み。**次にやること**：①今の配置（椅子を挟んだTX/RX）でラベル付きデータ収集・診断指標（diff_score等）の検証に進む②`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版、動作しない診断コード）の扱いを決める（削除 or Arduino非対応の注記を残して放置）③TX1台+RX複数台のブロードキャスト型構成へ発展させるか判断（ATOM Liteだけで組める目処が立った）④InterDeviceCSIも同様にArduinoで壁に当たるか検証（未確認）⑤元祖ESP32RXの高ボーレート化（未解決、優先度低）
+1. **【解決済み・要clean up】SpecificDeviceCSIはArduino frameworkでは機能しない。素のESP-IDFなら動作確認済み**：`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版）ではAP非接続+promiscuousでCSIコールバックがほぼ発火しない問題があり（`#22`）、チップをAtomS3 Lite(S3)に変えても再現した（`#23`）。原因はチップではなく**Arduinoのesp_now実装に送信レート明示指定API`esp_now_set_peer_rate_config()`が存在しないこと**だった。独立プロジェクト`idf_csi_test/`（RX=AtomS3 Lite）・`idf_csi_test_tx/`（TX=元祖ESP32、いずれも`framework=espidf`）で、①`sdkconfig.defaults`に`CONFIG_ESP_WIFI_CSI_ENABLED=y`を追加②TX/RX双方に`esp_now_set_peer_rate_config()`（HT40/MCS0_LGI）を追加、の2点を直したところ`csi_matched`がTXの送信レート(100Hz)とほぼ1:1で取れるようになった（`#24`）。実データのCSV出力パイプラインも構築済み（`#25`）：CSIコールバック内直接printfでのウォッチドッグ発火→キュー化、印字タスクのCPU1固定、全サブキャリア出力時の実効スループット不足（シリアル出力チャネル自体がボトルネック、書式化の軽量化では改善せず）→コールバック内で100Hzのまま受けつつAVERAGE_WINDOW(10)回分をバイト単位平均して1本だけ出力、という3段階の問題を解決し、`dropped=0`で安定。出力形式は`CSI_HEX,<seq>,<rssi>,<生I/Q整数のhex文字列>`（振幅計算はPC側で行う設計）。**リアルタイム可視化ツール`tools/csi_ws_server/`も構築済み**（Python WebSocketサーバー+nginx配信のHTML、docker-composeで起動。waterfall/spectrum/scatterの3モード）。**RXは元祖ESP32(ATOM Lite)でも動作確認済み**（`#26`）——チップに依存せず、TX/RXともATOM Liteだけで構成できる（ただし元祖ESP32側は外付けFTDI経由の実UARTのため、高ボーレート化(921600/2000000)ではS3のネイティブUSBと違い文字化けする問題が残っており、当面115200運用）。USBパススルー（`usbipd-win`でWindows→WSL2→Dockerへ）の手順も確立済み（`#27`）。**TXはPC非接続の単体運用に対応**：`idf_csi_test_tx/`に`espressif/led_strip`マネージドコンポーネントを追加し、ATOM Lite内蔵RGB LED（GPIO27, SK6812）を起動後緑点灯させる処理を入れた（点滅だとタイミングのブレが位置推定に悪影響しそうなので点灯固定）。電源さえ入っていればPCなしで送信し続けられる。**次にやること**：①今の配置（椅子を挟んだTX/RX）でラベル付きデータ収集・診断指標（diff_score等）の検証に進む②`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版、動作しない診断コード）の扱いを決める（削除 or Arduino非対応の注記を残して放置）③TX1台+RX複数台のブロードキャスト型構成へ発展させるか判断（ATOM Liteだけで組める目処が立った）④InterDeviceCSIも同様にArduinoで壁に当たるか検証（未確認）⑤元祖ESP32RXの高ボーレート化（未解決、優先度低）
 2. **`diff_score`をサブキャリア0〜50帯（Legacy LTF）限定に改修する**：`main.cpp`の`diff_score`計算を該当帯域のみに限定するよう修正し、実機で動きの検知精度が改善するか確認する
 3. **C3サブキャリア形状によるドリフト補正の再現性確認**：`#20e`/`#20f`は1セッション・11区間のみの結果。別セッションで往復データを録り直し、同じ傾向（形状ベース判定が外れ値ケースを補正できる）が出るか確認する
 4. **経路遮蔽仮説の再現性確認**：`#14`・`#18`で支持する結果は得られたが、いずれも1回きりの試行。次回は遮蔽の開始/終了もアプリでタップし、複数回試行して再現性を確認する
@@ -100,20 +100,23 @@ Espressif公式`esp-csi`リポジトリ（[github.com/espressif/esp-csi](https:/
 ```
 .
 ├── README.md                 # プロジェクト概要
-├── platformio.ini            # PlatformIO設定（arduino framework）
+├── platformio.ini            # RouterCSI用PlatformIO設定（arduino framework）
 │                              #   env:esp32-s3, env:xiao-c3, env:m5atom-lite → RouterCSI(main.cpp)
-│                              #   env:m5atom-lite-tx, env:m5atom-lite-rx → SpecificDeviceCSI診断用
+│                              #   env:m5atom-lite-tx/-rx, env:atoms3-lite-tx/-rx → SpecificDeviceCSI Arduino版（動作しない診断コード、#22-#24）
 ├── src/
 │   ├── main.cpp               # RouterCSI用ファームウェア（シリアル出力＋WiFi UDPでのサブキャリア送信、本命ルート）
-│   ├── csi_tx.cpp             # SpecificDeviceCSI送信専用（診断版、#22参照）
-│   ├── csi_rx.cpp             # SpecificDeviceCSI受信専用（診断版、#22参照）
+│   ├── csi_tx.cpp             # SpecificDeviceCSI送信専用（Arduino版、動作しない診断コード、#22参照）
+│   ├── csi_rx.cpp             # SpecificDeviceCSI受信専用（Arduino版、動作しない診断コード、#22参照）
 │   ├── secrets.h              # WiFi認証情報・送信先IP（.gitignore済み、各自作成）
 │   └── secrets.h.example      # secrets.hのテンプレート
+├── idf_csi_test/              # SpecificDeviceCSI受信(RX)、素のESP-IDF実装（独立プロジェクト、動作確認済み#24〜#26）
+├── idf_csi_test_tx/           # SpecificDeviceCSI送信(TX)、素のESP-IDF実装（独立プロジェクト、PC非接続運用対応・LED付き）
 ├── esphome/                   # ESPHome版（参考・代替ルート、現在未使用）
 │   ├── csi_test_atoms3lite.yaml
 │   └── csi_test_cariot_devboard.yaml
 ├── tools/
-│   ├── csi_listener/           # PC側受信スクリプト(Docker化)。CSIデータ・位置報告をCSVに記録
+│   ├── csi_listener/           # RouterCSI用PC側受信スクリプト(Docker化)。CSIデータ・位置報告をCSVに記録
+│   ├── csi_ws_server/           # SpecificDeviceCSIのリアルタイム可視化(WebSocket+docker-compose、#26)
 │   └── position_reporter/      # Flutter製Androidアプリ。ボタンタップで位置ラベルをUDP送信
 ├── docs/
 │   ├── verification_procedure.md   # ESPHome版の検証手順（参考）

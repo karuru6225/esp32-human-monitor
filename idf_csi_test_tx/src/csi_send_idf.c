@@ -8,7 +8,13 @@
  * ArduinoのESP-NOW実装(framework-arduinoespressif32)には無い
  * esp_now_set_peer_rate_config()（送信レート明示指定）が、こちらの
  * espidf側では使えるので、公式サンプル通りHT40/MCS0_LGIを指定する。
- * RXは idf_csi_test/（AtomS3 Lite, ESP32-S3）を使う。
+ * RXは idf_csi_test/（AtomS3 Lite, ESP32-S3 または元祖ESP32）を使う。
+ *
+ * PCに接続せず単体で運用する想定なので、動作確認用にATOM Lite内蔵の
+ * RGB LED(GPIO27, SK6812)を起動後点灯しっぱなしにする
+ * （espressif/led_stripマネージドコンポーネント使用）。
+ * 点滅させるとタイミングのブレが位置推定に悪影響しそうなので、
+ * ループ内では触らず起動時に1回点けるだけにしてある。
  */
 #include <stdio.h>
 #include <string.h>
@@ -22,8 +28,10 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_now.h"
+#include "led_strip.h"
 
 #define WIFI_CHANNEL 11
+#define STATUS_LED_GPIO 27
 /* RX側で受信を100Hzのまま受け続け、AVERAGE_WINDOW個ごとに平均して
    出力する方式に変更したため、送信側は100Hzに戻す
    （詳細はidf_csi_test/src/csi_recv_idf.c参照） */
@@ -73,6 +81,26 @@ static void wifi_esp_now_init(void)
     ESP_ERROR_CHECK(esp_now_set_peer_rate_config(peer.peer_addr, &rate_config));
 }
 
+static led_strip_handle_t configure_status_led(void)
+{
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = STATUS_LED_GPIO,
+        .max_leds = 1,
+        .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        .flags = {.invert_out = false},
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,
+        .mem_block_symbols = 0,
+        .flags = {.with_dma = false},
+    };
+    led_strip_handle_t led_strip;
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
+    return led_strip;
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -84,6 +112,10 @@ void app_main(void)
 
     wifi_init();
     wifi_esp_now_init();
+    led_strip_handle_t led_strip = configure_status_led();
+    // 点灯しっぱなし（点滅によるタイミング揺れを避ける）
+    led_strip_set_pixel(led_strip, 0, 0, 20, 0); // 緑・低輝度
+    led_strip_refresh(led_strip);
 
     ESP_LOGI(TAG, "================ CSI SEND (pure ESP-IDF, rate_config set) ================");
     ESP_LOGI(TAG, "wifi_channel=%d send_frequency=%dHz tx_mac=" MACSTR " rx_mac=" MACSTR,
