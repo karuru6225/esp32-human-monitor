@@ -1,4 +1,4 @@
-# 引き継ぎメモ（2026-09-04時点）
+# 引き継ぎメモ（2026-09-05時点）
 
 このプロジェクトの「今どういう状態で、次に何をすべきか」をまとめたもの。
 README.mdが「プロジェクト概要」だとすると、こちらは「作業を引き継ぐための現状把握」の記録。
@@ -47,7 +47,8 @@ PlatformIO + Arduino framework、`esp_wifi_set_csi_rx_cb`でCSIコールバッ�
 ## ツール構成（`tools/`）
 
 - **`tools/csi_listener/`**：PC側でCSIデータ・位置報告を受信するリスナー。Docker化済み（`docker build -t csi-listener .` → `docker run -p 5005:5005/udp -p 5006:5006/udp -v ./data:/data csi-listener`）。UDP:5005でサブキャリア振幅データ、UDP:5006でスマホからの位置報告（JSON）を受け、それぞれCSVに書き出す。**Windows Git BashでDocker実行する際は`MSYS_NO_PATHCONV=1`を付けないと`-e`の値のパスが勝手にWindowsパスへ変換されて壊れるので注意**
-- **`tools/position_reporter/`**：Flutterで作ったAndroidアプリ。「椅子」「ベッド」「玄関」「不在」ボタンをタップすると、その場でPC(`tools/csi_listener`)へUDP(JSON)で位置ラベル+時刻を送る。ビルド・実機インストールは`flutter build apk --release` → `adb install -r build/app/outputs/flutter-apk/app-release.apk`（`flutter run`は使わないこと）。`AndroidManifest.xml`に`INTERNET`権限が必要
+- **`tools/position_reporter/`**：Flutterで作ったAndroidアプリ。**2026-09-05に間取り図タップ方式へ刷新**：`assets/floorplan.png`（部屋の間取り図画像）を表示し、タップした位置を正規化座標(x,y∈[0,1])としてUDP(JSON)で送信する（旧「椅子/ベッド/玄関」固定ボタンは廃止、離席を表す「不在」ボタンのみ残存）。既知の基準点（ルーター・椅子・A/B/C各ノード）を間取り図上に色分けマーカーで常時オーバーレイ表示するので、目標位置に合わせて実機を配置しやすい（`lib/main.dart`の`refPoints`定数、配置を変えたら座標を更新すること）。ビルド・実機インストールは`flutter build apk --release` → `adb install -r build/app/outputs/flutter-apk/app-release.apk`（`flutter run`は使わないこと）。`AndroidManifest.xml`に`INTERNET`権限が必要。`pcIp`定数はプレースホルダ`192.168.x.x`のままコミットされているので、ビルド前に環境に合わせて実際のLAN IPへ書き換えること（コミットはしない）
+- **`tools/csi_listener/data/position_log.csv`は複数セッション累積の共有ファイルで、ヘッダは旧フォーマット（`recv_time,label,client_time,addr`の4列）のまま固定されている**。上記の間取り図タップ機能導入後は6列（`x`,`y`列追加）の行も同じファイルに混在するため、**このCSVを解析する際はヘッダ名でなく列数(4 or 6)で判定すること**（`recv_time`をパースする位置は変わらない）
 
 ## 確立した知見（要点のみ、詳細は research_log.md）
 
@@ -62,6 +63,8 @@ PlatformIO + Arduino framework、`esp_wifi_set_csi_rx_cb`でCSIコールバッ�
 - 「椅子にいるかどうか」の2値判定はrssi差分の最近傍分類でかなり高精度（ゾーン占有配置で92.7%、トリップワイヤー配置で80〜85%）。**デバウンス（数秒連続で確定）は逆効果**——誤判定の多くはノイズでなく「センサーがアプリのタップより早く動きを検知しているラベル遅延」のため（`#19b`）
 - rssi差分（静止位置）とサブキャリア乱れピーク（移動方向）を組み合わせた2段階分類器は、キャリブレーション設計のあるデータで51.8%→82%程度まで改善（`#19`,`#20d`）
 - **2ノード間の乱れ順序による移動方向判定は、diff_score（サブキャリア乱れ）だけでなくrssiの移動平均でも成立する**：同一機種3台（ATOM Lite）でのトリップワイヤー2台のrssiに1秒移動平均をかけると、移動方向に応じて谷の発生順序が入れ替わり4/4で正しく判定できた（`#21`）。ただし谷の時間差そのもの（何秒前に通過したか）はタップ遅延の影響を受けやすくばらつきが大きい
+- **SpecificDeviceCSI（TX1台+RX2台）のrssi・CSI振幅・IQ平面誤差いずれにも、人体のy座標（部屋の奥行き方向）が読み取れる情報が乗っている**：間取り図タップで実測したxy座標とCSI/rssiを対応付けたところ、`[rssi_b,rssi_c]→y`の単純な線形回帰でR²=0.53〜0.75（2セッション、n=16）。ただしrssi_cとyの関係は単調ではなく、部屋の中間あたりにピークがあり両端（冷蔵庫コーナー側・部屋奥側）で弱まる山型——一方の裾だけを見ると単調な相関に見える（`#33`,`#35`）。**x方向（間口方向）は家具の制約で立てる場所がほとんど確保できず、ほぼ未検証のまま**。IQ平面誤差（振幅+位相を複素平面上の残差として合成、`#32`と同手法）でも、移動の瞬間の広帯域バーストだけでなく、**滞在中の残留誤差レベル自体が位置によって段階的にシフトする**現象が見えた（`#34`,`#35`）。CSIを受信しているRXノードの選び方（今回はB・Cの2台）によって情報量の多寡が回ごとに入れ替わる（1回目はCが情報源・Bはノイズ、2回目はB・Cとも良好）——固定的な優劣ではなく毎回の環境要因に左右される可能性が高い
+- **特定ゾーンでのCSIリンク完全消失（30.8秒間ゼロパケット）を1回観測したが、再現しなかった**：冷蔵庫コーナー付近でA→Cのリンクが完全に途切れる事象を確認した（同時刻A→Bは正常）が、同じ（むしろより奥の）座標に戻っても再現せず、位置固定のデッドゾーンという仮説は否定された。無線干渉など外的要因がたまたま重なった可能性が高いとして、原因追求は打ち切り（`#34`,`#35`）
 - **C3単体のサブキャリア「形」（絶対レベルを引いた相対プロファイル）で、rssiドリフトによる誤判定を部分的に補正できる兆しがある**。rssi差分単体・形状単体・OR判定（どちらかが椅子なら椅子）を公正比較すると、総合精度はOR判定が最良（85.1%）だが、バランス重視（それ以外の見逃しを避けたい）なら形状単体が有力（それ以外recall97.7%）。少数サンプルでの結果であり再現性は未検証（`#20e`,`#20f`）
 
 ## 未解決・注意点
@@ -85,6 +88,7 @@ Espressif公式`esp-csi`リポジトリ（[github.com/espressif/esp-csi](https:/
 ## 次のアクション候補（優先度つき）
 
 1. **【解決済み・要clean up】SpecificDeviceCSIはArduino frameworkでは機能しない。素のESP-IDFなら動作確認済み**：`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版）ではAP非接続+promiscuousでCSIコールバックがほぼ発火しない問題があり（`#22`）、チップをAtomS3 Lite(S3)に変えても再現した（`#23`）。原因はチップではなく**Arduinoのesp_now実装に送信レート明示指定API`esp_now_set_peer_rate_config()`が存在しないこと**だった。独立プロジェクト`idf_csi_test/`（RX=AtomS3 Lite）・`idf_csi_test_tx/`（TX=元祖ESP32、いずれも`framework=espidf`）で、①`sdkconfig.defaults`に`CONFIG_ESP_WIFI_CSI_ENABLED=y`を追加②TX/RX双方に`esp_now_set_peer_rate_config()`（HT40/MCS0_LGI）を追加、の2点を直したところ`csi_matched`がTXの送信レート(100Hz)とほぼ1:1で取れるようになった（`#24`）。実データのCSV出力パイプラインも構築済み（`#25`）：CSIコールバック内直接printfでのウォッチドッグ発火→キュー化、印字タスクのCPU1固定、全サブキャリア出力時の実効スループット不足（シリアル出力チャネル自体がボトルネック、書式化の軽量化では改善せず）→コールバック内で100Hzのまま受けつつAVERAGE_WINDOW(10)回分をバイト単位平均して1本だけ出力、という3段階の問題を解決し、`dropped=0`で安定。出力形式は`CSI_HEX,<seq>,<rssi>,<生I/Q整数のhex文字列>`（振幅計算はPC側で行う設計）。**リアルタイム可視化ツール`tools/csi_ws_server/`も構築済み**（Python WebSocketサーバー+nginx配信のHTML、docker-composeで起動。waterfall/spectrum/scatterの3モード）。**RXは元祖ESP32(ATOM Lite)でも動作確認済み**（`#26`）——チップに依存せず、TX/RXともATOM Liteだけで構成できる（ただし元祖ESP32側は外付けFTDI経由の実UARTのため、高ボーレート化(921600/2000000)ではS3のネイティブUSBと違い文字化けする問題が残っており、当面115200運用）。USBパススルー（`usbipd-win`でWindows→WSL2→Dockerへ）の手順も確立済み（`#27`）。**TXはPC非接続の単体運用に対応**：`idf_csi_test_tx/`に`espressif/led_strip`マネージドコンポーネントを追加し、ATOM Lite内蔵RGB LED（GPIO27, SK6812）を起動後緑点灯させる処理を入れた（点滅だとタイミングのブレが位置推定に悪影響しそうなので点灯固定）。電源さえ入っていればPCなしで送信し続けられる。**次にやること**：①今の配置（椅子を挟んだTX/RX）でラベル付きデータ収集・診断指標（diff_score等）の検証に進む②`src/csi_tx.cpp`/`src/csi_rx.cpp`（Arduino版、動作しない診断コード）の扱いを決める（削除 or Arduino非対応の注記を残して放置）③TX1台+RX複数台のブロードキャスト型構成へ発展させるか判断（ATOM Liteだけで組める目処が立った）④InterDeviceCSIも同様にArduinoで壁に当たるか検証（未確認）⑤元祖ESP32RXの高ボーレート化（未解決、優先度低）
+1b. **【進行中・最優先】座標推定（人体のxy座標を求める）の検証を継続する**：`#33`〜`#35`でy座標（部屋の奥行き方向）はrssi_b/rssi_cやCSI振幅・IQ平面誤差からR²=0.53〜0.75程度で読み取れることを確認済み。次にやること：①x方向（間口方向）に散らした立ち位置を追加で確保する（家具の制約が主なボトルネック。位置を変える/物をどかす等の対応を検討）②held-outでの予測精度検証（現状は全てin-sample R²で過学習気味の可能性あり）③rssi_cとyの山型（非単調）の関係をより多くの点で確認し、実際の回帰モデルを線形から2次以降に見直す④B・Cどちらが情報源になるかがセッションごとに入れ替わった原因（環境要因？）を突き止める⑤`tools/position_reporter/`の間取り図タップ機能・基準点オーバーレイ（`refPoints`定数）はそのまま使える
 2. **`diff_score`をサブキャリア0〜50帯（Legacy LTF）限定に改修する**：`main.cpp`の`diff_score`計算を該当帯域のみに限定するよう修正し、実機で動きの検知精度が改善するか確認する
 3. **C3サブキャリア形状によるドリフト補正の再現性確認**：`#20e`/`#20f`は1セッション・11区間のみの結果。別セッションで往復データを録り直し、同じ傾向（形状ベース判定が外れ値ケースを補正できる）が出るか確認する
 4. **経路遮蔽仮説の再現性確認**：`#14`・`#18`で支持する結果は得られたが、いずれも1回きりの試行。次回は遮蔽の開始/終了もアプリでタップし、複数回試行して再現性を確認する
@@ -116,7 +120,7 @@ Espressif公式`esp-csi`リポジトリ（[github.com/espressif/esp-csi](https:/
 ├── tools/
 │   ├── csi_listener/           # RouterCSI用PC側受信スクリプト(Docker化)。CSIデータ・位置報告をCSVに記録
 │   ├── csi_ws_server/           # SpecificDeviceCSIのリアルタイム可視化(WebSocket+docker-compose、#26)
-│   └── position_reporter/      # Flutter製Androidアプリ。ボタンタップで位置ラベルをUDP送信
+│   └── position_reporter/      # Flutter製Androidアプリ。間取り図タップで座標(x,y)をUDP送信
 ├── docs/
 │   ├── verification_procedure.md   # ESPHome版の検証手順（参考）
 │   ├── handoff.md                  # このファイル（現状把握・次のアクション）
