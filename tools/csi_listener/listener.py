@@ -55,7 +55,7 @@ def position_listener():
     with open(POS_OUT_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not header_written:
-            writer.writerow(["recv_time", "label", "client_time", "addr"])
+            writer.writerow(["recv_time", "label", "x", "y", "client_time", "addr"])
             f.flush()
         while True:
             data, addr = sock.recvfrom(1024)
@@ -63,13 +63,17 @@ def position_listener():
             try:
                 obj = json.loads(data.decode("utf-8"))
                 label = obj.get("label", "")
+                x = obj.get("x", "")
+                y = obj.get("y", "")
                 client_time = obj.get("client_time", "")
             except Exception:
                 label = data.decode("utf-8", errors="replace")
+                x = ""
+                y = ""
                 client_time = ""
-            writer.writerow([f"{recv_t:.3f}", label, client_time, addr[0]])
+            writer.writerow([f"{recv_t:.3f}", label, x, y, client_time, addr[0]])
             f.flush()
-            print(f"[pos] {label} @ {client_time} from {addr[0]}", flush=True)
+            print(f"[pos] {label} x={x} y={y} @ {client_time} from {addr[0]}", flush=True)
 
 
 if __name__ == "__main__":
