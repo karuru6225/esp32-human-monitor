@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'secrets.dart' as secrets;
+
 void main() => runApp(const PositionReporterApp());
 
 class PositionReporterApp extends StatelessWidget {
@@ -35,8 +37,8 @@ class ReporterPage extends StatefulWidget {
 
 class _ReporterPageState extends State<ReporterPage> {
   // PC側 tools/csi_listener の position_listener (UDP) 宛先
-  // 環境に合わせて自分のPCのLAN IPに書き換えてからビルドすること
-  static const String pcIp = '192.168.x.x';
+  // 実際のIPは secrets.dart (.gitignore済み) に分離。secrets.dart.exampleを参照
+  static const String pcIp = secrets.pcIp;
   static const int pcPort = 5006;
 
   // assets/floorplan.png の実サイズ(289x515)に合わせた縦横比

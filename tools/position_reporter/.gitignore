@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# PC側LAN IP(秘匿情報)。secrets.dart.exampleをコピーして作ること
+lib/secrets.dart
